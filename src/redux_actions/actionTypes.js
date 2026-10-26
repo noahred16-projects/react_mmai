@@ -16,3 +16,16 @@ export const CHANGE_COLOR = 'CHANGE_COLOR';
 export const SUBSCRIBER = 'SUBSCRIBER';
 export const OPENING_BOOK = 'OPENING_BOOK';
 
+// Dead-Pente (docs/dead-pente-spec.md, Phase 2).
+export const SELECT_DEAD_PENTE_CONFIG = 'SELECT_DEAD_PENTE_CONFIG';
+export const TOGGLE_DEAD_STONE_MODE = 'TOGGLE_DEAD_STONE_MODE';
+export const PLACE_DEAD_STONE = 'PLACE_DEAD_STONE';
+
+// Dead-Pente, on_capture trigger (Phase 4, Noah's four presets). Distinct from PLACE_DEAD_STONE
+// so the saga can `take` specifically a human's reactive placement without also catching the
+// AI's own self-dispatched PLACE_DEAD_STONE calls (Karl's turn_window and this trigger's own
+// AI-capture path both dispatch plain PLACE_DEAD_STONE). The reducer handles this action
+// identically to PLACE_DEAD_STONE.
+export const RESOLVE_CAPTURE_DEAD_STONE = 'RESOLVE_CAPTURE_DEAD_STONE';
+export const DECLINE_DEAD_STONE_WINDOW = 'DECLINE_DEAD_STONE_WINDOW';
+

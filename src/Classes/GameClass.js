@@ -19,6 +19,15 @@ export const GameState = {
 
 const coordinateLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T'];
 
+// Dead-Pente (docs/dead-pente-spec.md): a third, colorless cell state. Every capture/win
+// detector below (#detectPenteCapture, #detectKeryoPenteCapture, #detectPoof, #detectPenteOf)
+// matches a cell by strict equality against color 1 or 2, so DEAD_STONE already behaves as an
+// unoccupiable wall -- blocks line-of-5, can't be captured, can't complete a capture flank --
+// with no changes to any of those functions. Placement is intentionally NOT wired into
+// addMove/moves/replayGame here: that history integration (so undo/redo/goForwardBack also
+// replay dead-stone placements) is middleware/Redux-layer work, not core-engine work.
+export const DEAD_STONE = 3;
+
 export class Game {
     constructor() {
         this.game = 1;
@@ -59,6 +68,9 @@ export class Game {
         newGame.hasPass = this.hasPass;
         newGame.doublePass = this.doublePass;
         newGame.goDeadStonesByPlayer = this.goDeadStonesByPlayer;
+        newGame.deadStoneMoves = this.deadStoneMoves;
+        newGame.deadStoneAttachments = this.deadStoneAttachments;
+        newGame.lastCaptureVacancies = this.lastCaptureVacancies;
         newGame.setGame(this.game);
         newGame.rated = this.rated;
         newGame.me = this.me;
@@ -502,6 +514,16 @@ export class Game {
         this.goTerritoryByPlayer = {1: [], 2: []};
         this.hasPass = false; this.doublePass = false;
         this.goDeadStonesByPlayer = {1: [], 2: []};
+        this.deadStoneMoves = new Set();
+        // Dead-Pente, actionCost: 'additional' (Phase 3): a dead stone placed alongside a
+        // normal move in the same turn, rather than consuming its own moves[] entry. Keyed
+        // by the move index it's attached to -- the real move about to be played when
+        // attachDeadStone() is called in live play, or already played when reconstructed by
+        // replay. Value is [x, y]. See attachDeadStone().
+        this.deadStoneAttachments = new Map();
+        // Dead-Pente, on_capture trigger (Phase 4): which cells the most recently processed
+        // move vacated via capture, if any. See #detectPenteCapture.
+        this.lastCaptureVacancies = [];
         this.winner = undefined;
         this.#resetAbstractBoard();
     };
@@ -519,6 +541,14 @@ export class Game {
             this.until -= 1;
         }
         this.moves = new_moves;
+        // Drop any dead-stone markers for indices that no longer exist, so a later move
+        // replayed into a now-reused index isn't mistaken for a dead-stone placement.
+        this.deadStoneMoves = new Set([...this.deadStoneMoves].filter(i => i < this.moves.length));
+        for (const i of [...this.deadStoneAttachments.keys()]) {
+            if (i >= this.moves.length) {
+                this.deadStoneAttachments.delete(i);
+            }
+        }
         this.replayGame();
     };
 
@@ -549,8 +579,12 @@ export class Game {
             until = this.moves.length;
         }
         let moves = this.moves;
+        let deadStoneMoves = this.deadStoneMoves;
+        let deadStoneAttachments = this.deadStoneAttachments;
         this.resetBoard();
         this.moves = moves;
+        this.deadStoneMoves = deadStoneMoves;
+        this.deadStoneAttachments = deadStoneAttachments;
         if (this.game < 3) {
             this.#replayPenteGame(until);
         } else if (this.game < 5) {
@@ -583,6 +617,14 @@ export class Game {
     addMoveFromList = (i) => {
         const move = this.moves[i];
         const x = move % this.gridSize, y = Math.floor(move / this.gridSize);
+        if (this.deadStoneMoves.has(i)) {
+            this.placeDeadStone(x, y);
+            return;
+        }
+        if (this.deadStoneAttachments.has(i)) {
+            const [dx, dy] = this.deadStoneAttachments.get(i);
+            this.placeDeadStone(dx, dy);
+        }
         if (this.game < 3) {
             let player = 1 + (i%2);
             this.#addPenteMove(x, y, player);
@@ -649,13 +691,72 @@ export class Game {
         }
     };
 
+    // A dead stone is legal only on a strictly empty cell -- 0, never -1 (tournament-blocked),
+    // 1/2 (a real stone), or 3 (already dead). Mirrors the "any_open" placementLocation from
+    // the config schema; "vacated_capture_space" placementLocation is a middleware-layer
+    // concern (it must additionally know which cells a capture just vacated).
+    canPlaceDeadStone = (x, y) => {
+        return this.abstractBoard[x][y] === 0;
+    };
+
+    placeDeadStone = (x, y) => {
+        if (!this.canPlaceDeadStone(x, y)) {
+            return false;
+        }
+        this.abstractBoard[x][y] = DEAD_STONE;
+        return true;
+    };
+
+    // Dead-Pente (docs/dead-pente-spec.md): spends a whole turn placing a dead stone instead
+    // of a normal one (the 'replacement' actionCost -- pushing onto `moves` is what advances
+    // currentPlayer()/isMyTurn() the same way a normal move would). Mirrors addMove's
+    // until-catchup, but never runs capture/win detection, since a dead stone can't trigger
+    // either. Like addMove, this trusts the caller for legality -- call canPlaceDeadStone(x, y)
+    // (and whatever the active config's trigger/count rules require) first.
+    addDeadStoneMove = (move) => {
+        if (this.until && this.until < this.moves.length) {
+            while (this.until < this.moves.length) {
+                this.until += 1;
+                this.addMoveFromList(this.until - 1);
+            }
+        }
+        const x = move % this.gridSize, y = Math.floor(move / this.gridSize);
+        this.deadStoneMoves.add(this.moves.length);
+        this.moves.push(move);
+        this.until = this.moves.length;
+        this.placeDeadStone(x, y);
+    };
+
+    // Dead-Pente, actionCost: 'additional': attaches a dead stone to a turn WITHOUT consuming
+    // its own moves[] entry or advancing currentPlayer(). This is what keeps the WASM engine's
+    // move-array parity (one entry == one alternating stone) intact: the dead stone never
+    // enters `moves` at all, so the engine never sees it. Like placeDeadStone, trusts the
+    // caller for legality.
+    //
+    // atIndex defaults to this.moves.length -- "the turn about to be played" (Phase 3, Karl:
+    // the caller places the dead stone BEFORE the accompanying normal move). Pass
+    // this.moves.length - 1 explicitly for "the turn that just happened" (Phase 4, Noah:
+    // on_capture is necessarily a reaction AFTER the capturing move already pushed onto
+    // moves[], so there is no "upcoming" index to attach to -- the real move already has one).
+    attachDeadStone = (move, atIndex = this.moves.length) => {
+        if (this.until && this.until < this.moves.length) {
+            while (this.until < this.moves.length) {
+                this.until += 1;
+                this.addMoveFromList(this.until - 1);
+            }
+        }
+        const x = move % this.gridSize, y = Math.floor(move / this.gridSize);
+        this.deadStoneAttachments.set(atIndex, [x, y]);
+        this.placeDeadStone(x, y);
+    };
+
     addMove = (move) => {
         if (this.until && this.until < this.moves.length) {
             while (this.until < this.moves.length) {
                 this.until += 1;
                 this.addMoveFromList(this.until - 1);
             }
-        } 
+        }
         const x = move % this.gridSize, y = Math.floor(move / this.gridSize);
         this.moves.push(move);
         this.until = this.moves.length;
@@ -812,8 +913,16 @@ export class Game {
     #replayPenteGame = (until) => {
         // this.#resetAbstractBoard();
         for (let i = 0; i < Math.min(this.moves.length, until); i++) {
-            let color = 1 + (i%2);
             let x = this.moves[i] % 19, y = Math.floor(this.moves[i] / 19);
+            if (this.deadStoneMoves.has(i)) {
+                this.placeDeadStone(x, y);
+                continue;
+            }
+            if (this.deadStoneAttachments.has(i)) {
+                const [dx, dy] = this.deadStoneAttachments.get(i);
+                this.placeDeadStone(dx, dy);
+            }
+            let color = 1 + (i%2);
             this.#addPenteMove(x, y, color);
         }
         if (this.rated && (this.moves.length === 2)) {
@@ -1353,7 +1462,15 @@ export class Game {
 
     };
 
+    // Dead-Pente, on_capture trigger (Phase 4, Noah's four presets): lastCaptureVacancies
+    // records exactly which cells THIS call's capture(s) emptied, so the middleware/UI can
+    // offer them as "vacated_capture_space" placement targets. Reset at the top of every call
+    // (this runs exactly once per move, via #addPenteMove) and pushed to for every direction
+    // that actually captures. Purely additive -- every other variant that shares this function
+    // (Keryo/Poof/Boat/O-Pente/G-Pente/D-Pente, all via #addPenteMove) now also populates this
+    // field, but nothing reads it unless a Dead-Pente on_capture config is active.
     #detectPenteCapture = (i, j, myColor) => {
+        this.lastCaptureVacancies = [];
         let opponentColor = 1 + (myColor % 2);
         if ((i-3) > -1) {
             if (this.abstractBoard[i-3][j] === myColor) {
@@ -1361,6 +1478,7 @@ export class Game {
                     this.abstractBoard[i-1][j] = 0;
                     this.abstractBoard[i-2][j] = 0;
                     this.captures[opponentColor] += 2;
+                    this.lastCaptureVacancies.push([i-1, j], [i-2, j]);
                 }
             }
         }
@@ -1370,6 +1488,7 @@ export class Game {
                     this.abstractBoard[i-1][j-1] = 0;
                     this.abstractBoard[i-2][j-2] = 0;
                     this.captures[opponentColor] += 2;
+                    this.lastCaptureVacancies.push([i-1, j-1], [i-2, j-2]);
                 }
             }
         }
@@ -1379,6 +1498,7 @@ export class Game {
                     this.abstractBoard[i][j-1] = 0;
                     this.abstractBoard[i][j-2] = 0;
                     this.captures[opponentColor] += 2;
+                    this.lastCaptureVacancies.push([i, j-1], [i, j-2]);
                 }
             }
         }
@@ -1388,6 +1508,7 @@ export class Game {
                     this.abstractBoard[i+1][j-1] = 0;
                     this.abstractBoard[i+2][j-2] = 0;
                     this.captures[opponentColor] += 2;
+                    this.lastCaptureVacancies.push([i+1, j-1], [i+2, j-2]);
                 }
             }
         }
@@ -1397,6 +1518,7 @@ export class Game {
                     this.abstractBoard[i+1][j] = 0;
                     this.abstractBoard[i+2][j] = 0;
                     this.captures[opponentColor] += 2;
+                    this.lastCaptureVacancies.push([i+1, j], [i+2, j]);
                 }
             }
         }
@@ -1406,6 +1528,7 @@ export class Game {
                     this.abstractBoard[i+1][j+1] = 0;
                     this.abstractBoard[i+2][j+2] = 0;
                     this.captures[opponentColor] += 2;
+                    this.lastCaptureVacancies.push([i+1, j+1], [i+2, j+2]);
                 }
             }
         }
@@ -1415,6 +1538,7 @@ export class Game {
                     this.abstractBoard[i][j+1] = 0;
                     this.abstractBoard[i][j+2] = 0;
                     this.captures[opponentColor] += 2;
+                    this.lastCaptureVacancies.push([i, j+1], [i, j+2]);
                 }
             }
         }
@@ -1424,6 +1548,7 @@ export class Game {
                     this.abstractBoard[i-1][j+1] = 0;
                     this.abstractBoard[i-2][j+2] = 0;
                     this.captures[opponentColor] += 2;
+                    this.lastCaptureVacancies.push([i-1, j+1], [i-2, j+2]);
                 }
             }
         }

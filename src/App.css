@@ -12,6 +12,18 @@
     animation: glowing 3000ms infinite;
 }
 
+/* The info-panel header ("Pente"/"Dead-Pente: ...") and "Captures:" label use MUI's default
+   h3/h4 sizes, which are sized for a wide desktop panel. On a narrow (mobile) viewport they
+   eat most of the available width/height on their own -- shrink them there. */
+@media (max-width: 700px) {
+    .MuiTypography-h3 {
+        font-size: 1.5rem !important;
+    }
+    .MuiTypography-h4 {
+        font-size: 1.1rem !important;
+    }
+}
+
 
 .boardline {
     stroke: #000000;

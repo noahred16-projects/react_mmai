@@ -1,7 +1,9 @@
 import React  from 'react';
 import BoardSquare from './BoardSquare';
 import { GameState, Game } from "../Classes/GameClass";
-import { ADD_MOVE } from "../redux_actions/actionTypes";
+import { ADD_MOVE, PLACE_DEAD_STONE, RESOLVE_CAPTURE_DEAD_STONE } from "../redux_actions/actionTypes";
+import { DEAD_STONE } from "../Classes/GameClass";
+import { isDeadStoneTurnEligible } from "../Classes/DeadPenteRules";
 import { connect } from 'react-redux';
 import PropTypes from 'prop-types';
 // import {send_message} from "../redux_actions/actionTypes";
@@ -10,7 +12,9 @@ const mapStateToProps = state => {
     return {
         game: state.game,
         game_id: state.game.game,
-        started: state.started
+        started: state.started,
+        deadPenteConfig: state.deadPenteConfig,
+        placingDeadStone: state.placingDeadStone
     }
 };
 
@@ -19,12 +23,19 @@ const mapDispatchToProps = dispatch => {
         send_move: move => {
             dispatch({type: ADD_MOVE, payload: move});
         },
+        send_dead_stone: move => {
+            dispatch({type: PLACE_DEAD_STONE, payload: move});
+        },
+        send_resolve_capture: move => {
+            dispatch({type: RESOLVE_CAPTURE_DEAD_STONE, payload: move});
+        },
     }
 };
 
 
 const UnconnectedBoard = (props) => {
-    const { started, game_id, game, send_move } = props;
+    const { started, game_id, game, send_move, send_dead_stone, send_resolve_capture,
+        deadPenteConfig, placingDeadStone } = props;
 
     // console.log(JSON.stringify(game.abstractBoard))
 
@@ -33,12 +44,34 @@ const UnconnectedBoard = (props) => {
         let board = [];
         let player_colors = [undefined, 'white-stone-gradient', 'black-stone-gradient'];
         if (game.isGo()) { player_colors = [undefined, 'black-stone-gradient', 'white-stone-gradient']; }
+        // DEAD_STONE (3): Dead-Pente's colorless wall stone, reusing Go's existing
+        // red-stone-gradient asset (same class the Go "mark dead stones" UI already renders).
+        player_colors[DEAD_STONE] = 'red-stone-gradient';
         let hover = player_colors[game.currentColor()];
         if (game.isGo() && game.gameState.goState === GameState.GoState.MARK_STONES) {
             hover = 'red-stone-gradient';
         }
+        if (deadPenteConfig && placingDeadStone) {
+            hover = 'red-stone-gradient';
+        }
         // const myTurn = table.isMyTurn(game) && game.gameState.state === GameState.State.STARTED;
-        const myTurn = started && game.isMyTurn();
+        // A Dead-Pente mode with allowAi: false is local pass-and-play between two humans at
+        // this screen -- there is no computer side, so whichever color's turn it is, it's
+        // this screen's turn too.
+        const aiDisabled = deadPenteConfig && deadPenteConfig.deadStones.allowAi === false;
+        const myTurn = started && (game.isMyTurn() || aiDisabled);
+        // Dead-Pente, on_capture trigger (Phase 4): right after the human's own move captures,
+        // currentPlayer() has already flipped to the opponent -- myTurn is correctly false here
+        // (no normal move should be clickable), but the human still owes a reactive placement.
+        // That's a separate, narrower click-enablement: only the exact vacated cells, not the
+        // whole empty board, and routed to a dedicated dispatch (see actionTypes.js).
+        const humanColor = game.me === 'white' ? 1 : 2;
+        const pendingCaptureReaction = started && deadPenteConfig &&
+            deadPenteConfig.deadStones.trigger === 'on_capture' &&
+            isDeadStoneTurnEligible(game, deadPenteConfig, humanColor);
+        if (pendingCaptureReaction) {
+            hover = 'red-stone-gradient';
+        }
         // console.log('my turn: ', myTurn);
         // console.log('my turn: ', table.isMyTurn(game));
         // console.log('makeBoard');
@@ -74,7 +107,10 @@ const UnconnectedBoard = (props) => {
                 let clickHandler = undefined;
                 if (myTurn) {
                     if (game.abstractBoard[i][j] === 0) {
-                        clickHandler = send_move;
+                        // DEAD_STONE (3) cells never reach here (not 0), so a wall is never
+                        // clickable for either action -- the same guard that already protects
+                        // real stones protects dead stones for free.
+                        clickHandler = (deadPenteConfig && placingDeadStone) ? send_dead_stone : send_move;
                     }
                     if (game.isGo() && game.gameState.goState === GameState.GoState.MARK_STONES) {
                         if (clickHandler === undefined) {
@@ -83,6 +119,9 @@ const UnconnectedBoard = (props) => {
                             clickHandler = undefined;
                         }
                     }
+                }
+                if (pendingCaptureReaction && game.lastCaptureVacancies.some(([vx, vy]) => vx === i && vy === j)) {
+                    clickHandler = send_resolve_capture;
                 }
                 board.push({ key: m, gridsize: gridsize, id: m,
                             part: squaretype, stone: stone,
