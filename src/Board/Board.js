@@ -207,6 +207,12 @@ const UnconnectedBoard = (props) => {
     } else {
         style = 'o-pente'
     }
+    // Dead-stones game modes layer on top of plain Pente via deadPenteConfig rather than a
+    // dedicated game_id, so flag the board with its own color independently of the style
+    // ladder above.
+    if (deadPenteConfig) {
+        style = 'dead-pente';
+    }
     let gridsize = 19;
     if (game_id === 21 || game_id === 22) { gridsize = 9; }
     if (game_id === 23 || game_id === 24) { gridsize = 13; }
