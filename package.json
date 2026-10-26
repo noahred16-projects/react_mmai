@@ -20,8 +20,12 @@
   "scripts": {
     "start": "rsbuild dev",
     "build": "rsbuild build",
+    "build:gh-pages": "ASSET_PREFIX=/react_mmai rsbuild build",
     "preview": "rsbuild preview",
     "test:variants": "node tests/gameclass.test.mjs",
+    "test:dead-pente": "node tests/dead-pente.test.mjs",
+    "test:dead-pente-rules": "node tests/dead-pente-rules.test.mjs",
+    "test:dead-pente-ai": "node tests/dead-pente-ai.test.mjs",
     "test:engine": "node tests/engine_referee.test.mjs",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
