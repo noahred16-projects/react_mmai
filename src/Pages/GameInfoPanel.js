@@ -22,6 +22,7 @@ import Typography from '@mui/material/Typography';
 import MovesListPanel from './MovesListPanel';
 import DeadPenteRulesModal from './DeadPenteRulesModal';
 import CorpsePenteRulesModal from './CorpsePenteRulesModal';
+import CorpsePenteV2RulesModal from './CorpsePenteV2RulesModal';
 
 const styles = theme => ({
     root: {
@@ -94,6 +95,7 @@ const UnconnectedGameInfoPanel = (props) => {
 
     const [rulesOpen, setRulesOpen] = useState(false);
     const [corpseRulesOpen, setCorpseRulesOpen] = useState(false);
+    const [corpseV2RulesOpen, setCorpseV2RulesOpen] = useState(false);
 
     // Dead-Pente, on_capture trigger (Phase 4): the human's own capturing move left them a
     // pending reactive placement. `color` is the human's seat ('white'/'black'); game.me tracks
@@ -194,7 +196,7 @@ const UnconnectedGameInfoPanel = (props) => {
                                             />
                                         }
                                     >
-                                        {[1, 3, 11, 13, 15, 25, 27].map(g =>
+                                        {[1, 3, 11, 13, 15, 25, 27, 29].map(g =>
                                             <MenuItem key={g} value={g}>{game.game_name(g)}</MenuItem>
                                         )}
                                     </Select>
@@ -215,7 +217,7 @@ const UnconnectedGameInfoPanel = (props) => {
                                 </Button>
                             </div>
                         </Grid>
-                        {game.game === 27 &&
+                        {(game.game === 27 || game.game === 29) &&
                         <Grid item xs>
                             <div style={{display: 'table', margin: '0 auto'}}>
                                 <Button variant="outlined" color={pvpMode ? 'error' : 'primary'} onClick={toggle_pvp_mode}>
@@ -229,6 +231,15 @@ const UnconnectedGameInfoPanel = (props) => {
                             <div style={{display: 'table', margin: '0 auto'}}>
                                 <Button variant="outlined" color="secondary" onClick={() => setCorpseRulesOpen(true)}>
                                     corpse-pente rules
+                                </Button>
+                            </div>
+                        </Grid>
+                        }
+                        {game.game === 29 &&
+                        <Grid item xs>
+                            <div style={{display: 'table', margin: '0 auto'}}>
+                                <Button variant="outlined" color="secondary" onClick={() => setCorpseV2RulesOpen(true)}>
+                                    corpse-pente v2 rules
                                 </Button>
                             </div>
                         </Grid>
@@ -319,6 +330,7 @@ const UnconnectedGameInfoPanel = (props) => {
             <DeadPenteRulesModal open={rulesOpen} onClose={() => setRulesOpen(false)}
                                   activeId={deadPenteConfig ? deadPenteConfig.gameModeId : null}/>
             <CorpsePenteRulesModal open={corpseRulesOpen} onClose={() => setCorpseRulesOpen(false)}/>
+            <CorpsePenteV2RulesModal open={corpseV2RulesOpen} onClose={() => setCorpseV2RulesOpen(false)}/>
         </div>
     );
 };

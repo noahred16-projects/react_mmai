@@ -20,6 +20,13 @@ struct VariantConfig {
 	                                // (instead of clearing), which stand in as a capture
 	                                // flank for either color and can themselves be swept
 	                                // away by any two real stones flanking a corpse pair.
+	bool corpsePairsV2 = false;     // Corpse-Pente v2: flanks must be the mover's own color
+	                                // exactly (no corpse stand-in, unlike corpsePairs above);
+	                                // each of the two middle cells is independent -- a real
+	                                // opponent stone is captured (+1, becomes a corpse), an
+	                                // already-corpse cell is swept with no credit. Mutually
+	                                // exclusive with corpsePairs (separate game id, separate
+	                                // code paths in dmov/Tree -- see Ai.cpp).
 	int  winRowLength = 5;          // Connect6: 6; not consumed yet (pattern tables are 5-based)
 	int  stonesPerTurn = 1;         // Connect6: 2; not consumed yet
 	bool tournamentOpening = true;  // feeds 'tourn', which the engine currently never reads

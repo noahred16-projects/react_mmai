@@ -72,19 +72,18 @@ function hasSixContiguous(g, color) {
     return false;
 }
 
-for (const gameId of [11, 15, 25, 27]) {
+for (const gameId of [11, 15, 25, 27, 29]) {
     const g = freshGame(gameId);
     g.addMove(180); // opening center (matches START_GAME saga), player 1
     let expected = countStones(g);
     let prev1 = g.captures[1], prev2 = g.captures[2];
     let ok = true, detail = '', plies = 0;
-    // Corpse-Pente (27): the added/removed/colorFlip accounting below already covers it for
-    // free -- a captured pair going from color 1/2 to CORPSE_STONE looks exactly like a
-    // normal capture-removal (neither "added" nor "color 1/2" afterward), and a cleaned-up
-    // corpse (CORPSE_STONE -> 0) never touched 1/2 at all, so it's invisible to that check
-    // too. This just separately confirms the mechanic actually fired in real engine-vs-engine
-    // play, not only in the crafted corpse-pente.test.mjs fixtures.
-    const plyCount = (gameId === 27) ? 40 : 20;
+    // Corpse-Pente v1/v2 (27/29): the added/removed/colorFlip accounting below already covers
+    // either variant for free -- a captured/swept cell going to/from CORPSE_STONE never
+    // touches color 1/2, so it's invisible to that check either way. This just separately
+    // confirms the mechanic actually fired in real engine-vs-engine play, not only in the
+    // crafted corpse-pente*.test.mjs fixtures.
+    const plyCount = (gameId === 27 || gameId === 29) ? 40 : 20;
     for (let ply = 0; ply < plyCount && !g.isGameOver(); ply++) {
         const before = snapshot(g);
         const mover = g.currentPlayer();
@@ -151,6 +150,28 @@ for (const gameId of [11, 15, 25, 27]) {
         lastDetail = `trial ${trials}: caps=${JSON.stringify(g.captures)}`;
     }
     check('engine<->referee game 27 (Corpse-Pente) real engine-vs-engine play produced corpses',
+        corpses > 0, `corpses=${corpses} after ${trials} trial(s), ${lastDetail}`);
+}
+
+// Same idea, game 29 (Corpse-Pente v2): confirms the engine's separate v2 code path
+// (corpsePairsV2 in dmov/Tree) also actually fires in real engine-vs-engine play.
+{
+    let corpses = 0, trials = 0, lastDetail = '';
+    for (trials = 0; trials < 5 && corpses === 0; trials++) {
+        const g = freshGame(29);
+        g.addMove(180);
+        for (let ply = 0; ply < 40 && !g.isGameOver(); ply++) {
+            const mv = engineMove(29, g.moves, 1, 0);
+            if (!Number.isInteger(mv) || mv < 0 || mv > 360) break;
+            const x = mv % 19, y = Math.floor(mv / 19);
+            if (!(g.abstractBoard[x][y] === 0 || g.abstractBoard[x][y] === -1)) break;
+            g.addMove(mv);
+        }
+        for (let x = 0; x < 19; x++) for (let y = 0; y < 19; y++)
+            if (g.abstractBoard[x][y] === CORPSE_STONE) corpses++;
+        lastDetail = `trial ${trials}: caps=${JSON.stringify(g.captures)}`;
+    }
+    check('engine<->referee game 29 (Corpse-Pente v2) real engine-vs-engine play produced corpses',
         corpses > 0, `corpses=${corpses} after ${trials} trial(s), ${lastDetail}`);
 }
 

@@ -130,7 +130,7 @@ function* addMove(action) {
     // Dead-Pente files; reused here as a cheap defensive nudge in case the two
     // implementations ever drift, so a landed-on-a-corpse bug degrades to "AI played an
     // adjacent cell" instead of silently un-capturing a corpse with no cleanup credit.
-    if (game.isCorpsePente()) {
+    if (game.isCorpsePente() || game.isCorpsePenteV2()) {
         const mx = move % game.gridSize, my = Math.floor(move / game.gridSize);
         if (!game.canPlaceDeadStone(mx, my)) {
             const fixed = nearestLegalCell(game, mx, my);

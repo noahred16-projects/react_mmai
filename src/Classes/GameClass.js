@@ -154,6 +154,8 @@ export class Game {
             name = 'O-Pente';
         } else if (g < 29) {
             name = 'Corpse-Pente';
+        } else if (g < 31) {
+            name = 'Corpse-Pente v2';
         }
         if (g % 2 === 0) {
             return 'Speed '+name;
@@ -224,6 +226,15 @@ export class Game {
             // Corpse-Pente: same capture-win threshold as plain Pente -- 10, immediate,
             // no advantage clause. The corpse mechanic changes what a capture leaves
             // behind, not how many captures it takes to win.
+            if (this.captures[1] >= 10) {
+                this.winner = 2;
+            }
+            if (this.captures[2] >= 10) {
+                this.winner = 1;
+            }
+        } else if (base === 29) {
+            // Corpse-Pente v2: same threshold/semantics as v1 (10, immediate, no advantage) --
+            // only the capture mechanic itself (#detectCorpsePenteV2Capture) differs.
             if (this.captures[1] >= 10) {
                 this.winner = 2;
             }
@@ -509,6 +520,9 @@ export class Game {
     isCorpsePente = () => {
         return this.game === 27 || this.game === 28;
     };
+    isCorpsePenteV2 = () => {
+        return this.game === 29 || this.game === 30;
+    };
     isGo = () => {
         return this.game > 18 && this.game < 25;
     };
@@ -637,6 +651,8 @@ export class Game {
             this.#replayOPenteGame(until);
         } else if (this.game < 29) {
             this.#replayCorpsePenteGame(until);
+        } else if (this.game < 31) {
+            this.#replayCorpsePenteV2Game(until);
         }
     };
     
@@ -717,6 +733,14 @@ export class Game {
         } else if (this.game < 29) {
             let player = 1 + (i%2);
             this.#addCorpsePenteMove(x, y, player);
+            if (this.rated && this.moves.length === 2) {
+                this.#applyTournamentRule();
+            } else if (this.rated && this.moves.length === 3) {
+                this.#undoTournamentRule();
+            }
+        } else if (this.game < 31) {
+            let player = 1 + (i%2);
+            this.#addCorpsePenteV2Move(x, y, player);
             if (this.rated && this.moves.length === 2) {
                 this.#applyTournamentRule();
             } else if (this.rated && this.moves.length === 3) {
@@ -877,6 +901,17 @@ export class Game {
         } else if (this.game < 29) {
             let player = 2 - (this.moves.length%2);
             this.#addCorpsePenteMove(x, y, player);
+            if (this.rated && this.moves.length === 2) {
+                this.#applyTournamentRule();
+            } else if (this.rated && this.moves.length === 3) {
+                this.#undoTournamentRule();
+            }
+            if (this.#detectPenteOf(player, move)) {
+                this.winner = player;
+            }
+        } else if (this.game < 31) {
+            let player = 2 - (this.moves.length%2);
+            this.#addCorpsePenteV2Move(x, y, player);
             if (this.rated && this.moves.length === 2) {
                 this.#applyTournamentRule();
             } else if (this.rated && this.moves.length === 3) {
@@ -1101,6 +1136,62 @@ export class Game {
                 this.abstractBoard[x1][y1] = CORPSE_STONE;
                 this.abstractBoard[x2][y2] = CORPSE_STONE;
                 this.captures[opponentColor] += 2;
+            }
+        }
+    };
+
+    // Corpse-Pente v2 (game 29/30): a second, independent variant alongside v1 above -- v1
+    // is untouched by any of this. The flank-stands-in-for-a-corpse mechanic is GONE: both
+    // flanks must be the mover's own color exactly, same as plain Pente. What's new instead
+    // is on the inside of the sandwich -- the two middle cells no longer need to match each
+    // other. Each is judged independently: a real opponent stone there is captured (credited
+    // +1, becomes a corpse); a cell that's already a corpse is simply swept off the board
+    // (no credit -- "the red ones don't count"). Both middle cells must be one of those two
+    // things (real opponent or corpse) for the sandwich to be valid at all; a flanked cell
+    // that's empty, or the mover's own color, isn't a capture. This single rule subsumes both
+    // v1's pair-capture AND its separate corpse-cleanup mechanic -- there's no companion
+    // cleanup function here, unlike #detectCorpseCleanup above.
+    #addCorpsePenteV2Move = (x, y, player) => {
+        this.#addGomokuMove(x, y, player);
+        this.#detectCorpsePenteV2Capture(x, y, player);
+    };
+    #replayCorpsePenteV2Game = (until) => {
+        for (let i = 0; i < Math.min(this.moves.length, until); i++) {
+            let color = 1 + (i % 2);
+            let x = this.moves[i] % 19, y = Math.floor(this.moves[i] / 19);
+            this.#addCorpsePenteV2Move(x, y, color);
+        }
+        if (this.rated && (this.moves.length === 2)) {
+            this.#applyTournamentRule();
+        }
+    };
+    #detectCorpsePenteV2Capture = (x, y, myColor) => {
+        const opponentColor = 1 + (myColor % 2);
+        const axes8 = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]];
+        const capturable = (v) => v === opponentColor || v === CORPSE_STONE;
+        for (const [dx, dy] of axes8) {
+            const x1 = x+dx, y1 = y+dy, x2 = x+2*dx, y2 = y+2*dy, x3 = x+3*dx, y3 = y+3*dy;
+            if (x3 < 0 || x3 > 18 || y3 < 0 || y3 > 18) {
+                continue;
+            }
+            if (this.abstractBoard[x3][y3] !== myColor) {
+                continue;
+            }
+            const v1 = this.abstractBoard[x1][y1], v2 = this.abstractBoard[x2][y2];
+            if (!capturable(v1) || !capturable(v2)) {
+                continue;
+            }
+            if (v1 === opponentColor) {
+                this.abstractBoard[x1][y1] = CORPSE_STONE;
+                this.captures[opponentColor] += 1;
+            } else {
+                this.abstractBoard[x1][y1] = 0;
+            }
+            if (v2 === opponentColor) {
+                this.abstractBoard[x2][y2] = CORPSE_STONE;
+                this.captures[opponentColor] += 1;
+            } else {
+                this.abstractBoard[x2][y2] = 0;
             }
         }
     };
