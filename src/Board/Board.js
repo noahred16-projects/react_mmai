@@ -2,7 +2,7 @@ import React  from 'react';
 import BoardSquare from './BoardSquare';
 import { GameState, Game } from "../Classes/GameClass";
 import { ADD_MOVE, PLACE_DEAD_STONE, RESOLVE_CAPTURE_DEAD_STONE } from "../redux_actions/actionTypes";
-import { DEAD_STONE } from "../Classes/GameClass";
+import { DEAD_STONE, CORPSE_STONE } from "../Classes/GameClass";
 import { isDeadStoneTurnEligible } from "../Classes/DeadPenteRules";
 import { connect } from 'react-redux';
 import PropTypes from 'prop-types';
@@ -14,7 +14,8 @@ const mapStateToProps = state => {
         game_id: state.game.game,
         started: state.started,
         deadPenteConfig: state.deadPenteConfig,
-        placingDeadStone: state.placingDeadStone
+        placingDeadStone: state.placingDeadStone,
+        pvpMode: state.pvpMode
     }
 };
 
@@ -35,7 +36,7 @@ const mapDispatchToProps = dispatch => {
 
 const UnconnectedBoard = (props) => {
     const { started, game_id, game, send_move, send_dead_stone, send_resolve_capture,
-        deadPenteConfig, placingDeadStone } = props;
+        deadPenteConfig, placingDeadStone, pvpMode } = props;
 
     // console.log(JSON.stringify(game.abstractBoard))
 
@@ -47,6 +48,9 @@ const UnconnectedBoard = (props) => {
         // DEAD_STONE (3): Dead-Pente's colorless wall stone, reusing Go's existing
         // red-stone-gradient asset (same class the Go "mark dead stones" UI already renders).
         player_colors[DEAD_STONE] = 'red-stone-gradient';
+        // Corpse-Pente's captured-pair cell; same red asset as DEAD_STONE, different cell
+        // value (a corpse can complete a capture flank and be swept away, DEAD_STONE can't).
+        player_colors[CORPSE_STONE] = 'red-stone-gradient';
         let hover = player_colors[game.currentColor()];
         if (game.isGo() && game.gameState.goState === GameState.GoState.MARK_STONES) {
             hover = 'red-stone-gradient';
@@ -58,7 +62,7 @@ const UnconnectedBoard = (props) => {
         // A Dead-Pente mode with allowAi: false is local pass-and-play between two humans at
         // this screen -- there is no computer side, so whichever color's turn it is, it's
         // this screen's turn too.
-        const aiDisabled = deadPenteConfig && deadPenteConfig.deadStones.allowAi === false;
+        const aiDisabled = (deadPenteConfig && deadPenteConfig.deadStones.allowAi === false) || pvpMode;
         const myTurn = started && (game.isMyTurn() || aiDisabled);
         // Dead-Pente, on_capture trigger (Phase 4): right after the human's own move captures,
         // currentPlayer() has already flipped to the opponent -- myTurn is correctly false here
@@ -204,8 +208,10 @@ const UnconnectedBoard = (props) => {
         style = 'dk-pente'
     } else if (game_id < 25) {
         style = 'go'
-    } else {
+    } else if (game_id < 27) {
         style = 'o-pente'
+    } else {
+        style = 'corpse-pente'
     }
     // Dead-stones game modes layer on top of plain Pente via deadPenteConfig rather than a
     // dedicated game_id, so flag the board with its own color independently of the style

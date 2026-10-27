@@ -16,6 +16,10 @@ struct VariantConfig {
 	bool poofPairs = false;         // Poof/O-Pente 2-stone poof; not consumed yet
 	bool poofTriples = false;       // O-Pente 3-stone poof; not consumed yet
 	bool boatWin = false;           // Boat/O-Pente provisional five; not consumed yet
+	bool corpsePairs = false;       // Corpse-Pente: captured pair -> CORPSE_STONE cells
+	                                // (instead of clearing), which stand in as a capture
+	                                // flank for either color and can themselves be swept
+	                                // away by any two real stones flanking a corpse pair.
 	int  winRowLength = 5;          // Connect6: 6; not consumed yet (pattern tables are 5-based)
 	int  stonesPerTurn = 1;         // Connect6: 2; not consumed yet
 	bool tournamentOpening = true;  // feeds 'tourn', which the engine currently never reads

@@ -14,6 +14,11 @@ int arc4random_uniform(int r) {
 	return rand()%r;
 }
 
+// Corpse-Pente board value for a captured-pair cell. Board values are otherwise 0 (empty),
+// -1 (empty, within search range of a stone), 1/2 (player stones) -- 3 is unused by every
+// other variant, so this is a pure addition: nothing elsewhere reads "3" as anything.
+const int CORPSE_STONE = 3;
+
 VariantConfig CAi::configFor(int gameId) {
 	// Canonical server IDs (GridStateFactory): Pente=1, Keryo=3, Poof=11,
 	// Connect6=13, Boat=15, O-Pente=25. Even IDs are Speed twins with the
@@ -49,6 +54,9 @@ VariantConfig CAi::configFor(int gameId) {
 			c.poofPairs = true;
 			c.poofTriples = true;
 			c.boatWin = true;
+			break;
+		case 27: // Corpse-Pente
+			c.corpsePairs = true;
 			break;
 		case 1: // Pente
 		default:
@@ -769,7 +777,32 @@ void CAi::dmov() {
         }
     }
 
-    // chk captures
+    // chk corpse cleanup (Corpse-Pente): two corpses flanked by any two real stones, either
+    // color, either combination, vanish -- no credit to anyone. Runs BEFORE the capture
+    // scan below so it only ever sees corpses left over from EARLIER moves: a capture's own
+    // two new corpses are, by construction, immediately flanked by the exact two real
+    // stones that just captured them, so scanning cleanup first means a capture can never
+    // self-trigger its own corpses' cleanup in the same move.
+    if (cfg.corpsePairs) {
+        for (d=0; d<8; d++) {
+            c1=sx[tn]+dx[d];
+            c2=sy[tn]+dy[d];
+            c3=c1+dx[d];
+            c4=c2+dy[d];
+            c5=c3+dx[d];
+            c6=c4+dy[d];
+            if (c5>=0 && c5<size && c6>=0 && c6<size)
+                if (brd[0][c1][c2]==CORPSE_STONE && brd[0][c3][c4]==CORPSE_STONE &&
+                    brd[0][c5][c6]>0) {
+                    brd[0][c1][c2]=-1;
+                    brd[0][c3][c4]=-1;
+                }
+        } // next d
+    } // if corpsePairs
+
+    // chk captures. Middle pair must be the SAME single opponent color on both cells (not
+    // merely "not mine") -- with corpsePairs this matters, since a corpse is also "not
+    // mine" but must never be captured as if it were a normal enemy stone.
     if (cfg.capturePairs) {
     for (d=0; d<8; d++) {
         c1=sx[tn]+dx[d];
@@ -781,12 +814,12 @@ void CAi::dmov() {
         c7=c5+dx[d];
         c8=c6+dy[d];
         if (c5>=0 && c5<size && c6>=0 && c6<size)
-            if (brd[0][c1][c2]>0 && brd[0][c3][c4]>0 &&
-                brd[0][c1][c2]!=cp && brd[0][c3][c4]!=cp) {
-                if (brd[0][c5][c6]==cp) {
+            if (brd[0][c1][c2]==3-cp && brd[0][c3][c4]==3-cp) {
+                if (brd[0][c5][c6]==cp ||
+                    (cfg.corpsePairs && brd[0][c5][c6]==CORPSE_STONE)) {
                     ccc[0][cp]+=2;
-                    brd[0][c1][c2]=-1;
-                    brd[0][c3][c4]=-1;
+                    brd[0][c1][c2]=cfg.corpsePairs ? CORPSE_STONE : -1;
+                    brd[0][c3][c4]=cfg.corpsePairs ? CORPSE_STONE : -1;
                 }
                 else {
                     if (c7>=0 && c7<size && c8>=0 && c8<size && cfg.captureTriples)
@@ -1065,7 +1098,10 @@ int CAi::Tree() {
     HValX[0]=HValY[0]=0; //init hash pos
     for ( x=0; x<19; x++ )
         for ( y=0; y<19; y++)
-            if (bd[x][y]==1 || bd[x][y]==2) {
+            // Corpse-Pente: fold in corpse cells too (bd==3), not just the two stone
+            // colors -- otherwise two root positions that differ only in corpse layout
+            // would alias to the same hash and corrupt the transposition table.
+            if (bd[x][y]==1 || bd[x][y]==2 || (cfg.corpsePairs && bd[x][y]==CORPSE_STONE)) {
                 HValX[0] ^= (bd[x][y]*TableX[x+19*y]);
                 HValY[0] ^= (bd[x][y]*TableY[x+19*y]);
             }
@@ -1331,7 +1367,40 @@ int CAi::Tree() {
                     }
                 }
 
-                // chk capture
+                // chk corpse cleanup (Corpse-Pente) -- see dmov() for the self-trigger
+                // rationale (runs BEFORE the capture block below, same reason).
+                if (cfg.corpsePairs) {
+                    for (d=0; d<8; d++) {
+                        c1=x+dx[d];
+                        c2=y+dy[d];
+                        c3=c1+dx[d];
+                        c4=c2+dy[d];
+                        c5=c3+dx[d];
+                        c6=c4+dy[d];
+                        if (c5>=0 && c5<19 && c6>=0 && c6<19)
+                            if (bd[c1][c2]==CORPSE_STONE && bd[c3][c4]==CORPSE_STONE &&
+                                bd[c5][c6]>0) {
+                                capx[lvl][ncap[lvl]]=c1;
+                                capy[lvl][ncap[lvl]]=c2;
+                                capv[lvl][ncap[lvl]++]=bd[c1][c2];
+                                capx[lvl][ncap[lvl]]=c3;
+                                capy[lvl][ncap[lvl]]=c4;
+                                capv[lvl][ncap[lvl]++]=bd[c3][c4];
+                                bd[c1][c2]=-1;
+                                bd[c3][c4]=-1;
+#if HASH == 1
+                                HValX[lvl] ^= (CORPSE_STONE*TableX[c1+19*c2]);
+                                HValY[lvl] ^= (CORPSE_STONE*TableY[c1+19*c2]);
+                                HValX[lvl] ^= (CORPSE_STONE*TableX[c3+19*c4]);
+                                HValY[lvl] ^= (CORPSE_STONE*TableY[c3+19*c4]);
+#endif
+                            }
+                    } // next d
+                } // if corpsePairs
+
+                // chk capture. Middle pair must be the SAME single opponent color on both
+                // cells (see dmov() -- matters once corpsePairs introduces a 3rd positive
+                // board value that must never be captured as if it were a normal enemy).
                 if (cfg.capturePairs) {
                 for (d=0; d<8; d++) {
                     c1=x+dx[d];
@@ -1343,9 +1412,9 @@ int CAi::Tree() {
                     c7=c5+dx[d];
                     c8=c6+dy[d];
                     if (c5>=0 && c5<19 && c6>=0 && c6<19)
-                        if (bd[c1][c2]>0 && bd[c3][c4]>0 &&
-                            bd[c1][c2]!=fr && bd[c3][c4]!=fr) {
-                            if (bd[c5][c6]==fr) {
+                        if (bd[c1][c2]==3-fr && bd[c3][c4]==3-fr) {
+                            if (bd[c5][c6]==fr ||
+                                (cfg.corpsePairs && bd[c5][c6]==CORPSE_STONE)) {
                                 cc[lvl][fr]+=2;
                                 capx[lvl][ncap[lvl]]=c1;
                                 capy[lvl][ncap[lvl]]=c2;
@@ -1353,16 +1422,22 @@ int CAi::Tree() {
                                 capx[lvl][ncap[lvl]]=c3;
                                 capy[lvl][ncap[lvl]]=c4;
                                 capv[lvl][ncap[lvl]++]=bd[c3][c4];
-                                bd[c1][c2]=-1;
-                                bd[c3][c4]=-1;
-                                
+                                bd[c1][c2]=cfg.corpsePairs ? CORPSE_STONE : -1;
+                                bd[c3][c4]=cfg.corpsePairs ? CORPSE_STONE : -1;
+
 #if HASH == 1
                                 HValX[lvl] ^= (en*TableX[c1+19*c2]);
                                 HValY[lvl] ^= (en*TableY[c1+19*c2]);
                                 HValX[lvl] ^= (en*TableX[c3+19*c4]);
                                 HValY[lvl] ^= (en*TableY[c3+19*c4]);
+                                if (cfg.corpsePairs) {
+                                    HValX[lvl] ^= (CORPSE_STONE*TableX[c1+19*c2]);
+                                    HValY[lvl] ^= (CORPSE_STONE*TableY[c1+19*c2]);
+                                    HValX[lvl] ^= (CORPSE_STONE*TableX[c3+19*c4]);
+                                    HValY[lvl] ^= (CORPSE_STONE*TableY[c3+19*c4]);
+                                }
 #endif
-                                
+
                             }
                             else {
                                 if (c7>=0 && c7<19 && c8>=0 && c8<19 && cfg.captureTriples)
@@ -1864,9 +1939,14 @@ int CAi::Score(CPoint pt) {
                         else la[iw]=0;
                     } else la[iw]=-1;
                 } //iw
-                if (la[1]>0 && la[1]!=fr)
-                    if (la[2]>0 && la[2]!=fr) { //b0
-                        if (la[3]==fr) c4+=2; //pair now open for capture
+                // Corpse-Pente: the pair itself must be the SAME single opponent color on
+                // both cells (==3-fr, not merely !=fr) -- a corpse is also "!=fr" but is
+                // never a normal capturable stone. The far-flank completion check right
+                // below stays OR-extended to accept a corpse flank (la[3]==CORPSE_STONE),
+                // since a corpse DOES stand in for "my own color" there.
+                if (la[1]==3-fr)
+                    if (la[2]==3-fr) { //b0
+                        if (la[3]==fr || (cfg.corpsePairs && la[3]==CORPSE_STONE)) c4+=2; //pair now open for capture
                         if (!la[3]) c5+=2; //pair no longer open for capture
                         if (la[3]>0 && la[3]!=fr && cfg.captureTriples) {
                             if (la[4]==fr) c4+=3;
@@ -1908,9 +1988,12 @@ int CAi::Score(CPoint pt) {
                         }
                     }//prot pr
                 }
-                if (la[1]>0 && la[1]!=fr) { //en
+                // Corpse-Pente: see the rescore branch above -- the pair must be the SAME
+                // single opponent color on both cells (==3-fr), with the far-flank
+                // completion checks below OR-extended to accept a corpse flank.
+                if (la[1]==3-fr) { //en
                     if (!la[2]) g1=1;
-                    if (la[2]>0 && la[2]!=fr) { //b0
+                    if (la[2]==3-fr) { //b0
                         if (!la[3]) { //threaten
                             g1=2;
                             if (!gf) for (i=1; i<3; i++) { //threatened pair
@@ -1920,8 +2003,8 @@ int CAi::Score(CPoint pt) {
                                 cap2++;
                             }
                         }
-                        
-                        if (la[3]==fr && !gf) {
+
+                        if ((la[3]==fr || (cfg.corpsePairs && la[3]==CORPSE_STONE)) && !gf) {
                             g1=3;
                             for (i=1; i<3; i++) {
                                 p1xy[cap1].x=x+dx[dv]*sign*i;
@@ -1932,7 +2015,7 @@ int CAi::Score(CPoint pt) {
                                 la[i]=0;
                             }
                         }
-                        if (la[3]==fr && gf==1) {
+                        if ((la[3]==fr || (cfg.corpsePairs && la[3]==CORPSE_STONE)) && gf==1) {
                             g1=0;
                             c4+=2;
                         }
@@ -1987,9 +2070,13 @@ int CAi::Score(CPoint pt) {
             if (cfg.captureTriples && g[0]==6 && g[1]==6) sco[fr]-=12; //pair
             for (iw=0; iw<5; iw+=4) { // O = played
                 for (i=1; i<=np; i++) { // Z = potential capturer
-                    if (i!=fr && lb[iw+1]>0 && lb[iw+2]>0) // OXYZ
-                        if (lb[iw+1]!=i && lb[iw+2]!=i) { // protect
-                            if (lb[iw+3]==i && (!cfg.captureTriples || lb[5-iw])) c3[i]+=2;
+                    // Corpse-Pente: the protected pair itself (iw+1, iw+2) must be fr's OWN
+                    // stones (==fr, not merely !=i) -- a corpse there is not fr's pair. The
+                    // far flank (iw+3) stays OR-extended: a corpse there completes player
+                    // i's capture exactly as player i's own stone would.
+                    if (i!=fr && lb[iw+1]==fr && lb[iw+2]==fr) // OXYZ
+                        { // protect
+                            if ((lb[iw+3]==i || (cfg.corpsePairs && lb[iw+3]==CORPSE_STONE)) && (!cfg.captureTriples || lb[5-iw])) c3[i]+=2;
                             if (cfg.captureTriples && lb[iw+3]!=i && lb[iw+3]>0 && lb[iw+4]==i) c3[i]+=3;
                         }
                 } // next i

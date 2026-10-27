@@ -62,8 +62,10 @@ function* addMove(action) {
         }
     }
     // Dead-Pente modes with allowAi: false (e.g. dead-pente-ned-open) are local pass-and-play
-    // between two humans -- never invoke the WASM engine for "the other" color.
-    const aiDisabled = deadPenteConfig && deadPenteConfig.deadStones.allowAi === false;
+    // between two humans -- never invoke the WASM engine for "the other" color. Same for the
+    // generic PvP toggle (Corpse-Pente's two-player mode).
+    const pvpMode = yield select((state) => state.pvpMode);
+    const aiDisabled = (deadPenteConfig && deadPenteConfig.deadStones.allowAi === false) || pvpMode;
     if (aiDisabled || game.isMyTurn() || game.isGameOver()) {
         return;
     }
@@ -112,6 +114,23 @@ function* addMove(action) {
     // the nearest real empty cell instead. Connect6 is unreachable here (Dead-Pente always
     // runs game 1), so this only ever needs to handle the single-move case.
     if (deadPenteConfig) {
+        const mx = move % game.gridSize, my = Math.floor(move / game.gridSize);
+        if (!game.canPlaceDeadStone(mx, my)) {
+            const fixed = nearestLegalCell(game, mx, my);
+            if (fixed) {
+                move = fixed[1] * game.gridSize + fixed[0];
+            }
+        }
+    }
+    // Corpse-Pente: the JS referee (GameClass) and the WASM engine (Ai.cpp) implement the
+    // corpse capture/cleanup rules independently -- same situation as every other variant
+    // already has (the engine never shares board state with GameClass), just with more
+    // mechanism to keep in lockstep. canPlaceDeadStone/nearestLegalCell are really just
+    // "is this cell truly empty" / "nearest truly-empty cell" despite living in the
+    // Dead-Pente files; reused here as a cheap defensive nudge in case the two
+    // implementations ever drift, so a landed-on-a-corpse bug degrades to "AI played an
+    // adjacent cell" instead of silently un-capturing a corpse with no cleanup credit.
+    if (game.isCorpsePente()) {
         const mx = move % game.gridSize, my = Math.floor(move / game.gridSize);
         if (!game.canPlaceDeadStone(mx, my)) {
             const fixed = nearestLegalCell(game, mx, my);

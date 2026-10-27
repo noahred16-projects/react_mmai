@@ -23,6 +23,8 @@
     "build:gh-pages": "ASSET_PREFIX=/react_mmai rsbuild build",
     "preview": "rsbuild preview",
     "test:variants": "node tests/gameclass.test.mjs",
+    "test:corpse-pente": "node tests/corpse-pente.test.mjs",
+    "test:corpse-engine-native": "cd MMAIWASM && g++ -std=c++11 -O2 Ai.cpp corpse_smoke.cpp -o /tmp/corpse_smoke_run && /tmp/corpse_smoke_run",
     "test:dead-pente": "node tests/dead-pente.test.mjs",
     "test:dead-pente-rules": "node tests/dead-pente-rules.test.mjs",
     "test:dead-pente-ai": "node tests/dead-pente-ai.test.mjs",

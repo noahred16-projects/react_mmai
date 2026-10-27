@@ -97,6 +97,9 @@
 .dead-pente {
     fill: #5C1A1B;
 }
+.corpse-pente {
+    fill: #9C6B3E;
+}
 /* Black grid lines/dots (the default, sized for the light-colored boards above) all but
    vanish against dead-pente's dark maroon fill -- lighten them for this board only. */
 .board.dead-pente ~ g .boardline,

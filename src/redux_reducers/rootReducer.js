@@ -5,15 +5,22 @@ import {
     START_THINKING, STOP_THINKING, LOAD_WASM, CHANGE_GAME,
     CHANGE_LEVEL, UNDO_MOVE, CHANGE_COLOR, SUBSCRIBER,
     OPENING_BOOK, SELECT_DEAD_PENTE_CONFIG, TOGGLE_DEAD_STONE_MODE,
-    PLACE_DEAD_STONE, RESOLVE_CAPTURE_DEAD_STONE
+    PLACE_DEAD_STONE, RESOLVE_CAPTURE_DEAD_STONE, TOGGLE_PVP_MODE
 } from "../redux_actions/actionTypes";
 import { Game } from '../Classes/GameClass';
 import { DEAD_PENTE_CONFIGS } from '../Classes/DeadPenteConfigs';
 import { canPlaceDeadStoneNow, ownerOfMoveIndex } from '../Classes/DeadPenteRules';
 
+// Corpse-Pente (27) is the default variant shown on load.
+const defaultGame = () => {
+    const g = new Game();
+    g.setGame(27);
+    return g;
+};
+
 const initialState = {
     subscriber: true,
-    game: new Game(),
+    game: defaultGame(),
     started: false,
     thinking: false,
     level: 1,
@@ -21,7 +28,10 @@ const initialState = {
     // Dead-Pente (docs/dead-pente-spec.md): null outside a Dead-Pente mode, so every other
     // variant's reducer/saga behavior is completely untouched by the fields below.
     deadPenteConfig: null,
-    placingDeadStone: false
+    placingDeadStone: false,
+    // Local two-player mode: both colors played by humans at this screen (no AI call).
+    // Currently only exposed for Corpse-Pente; irrelevant/unused elsewhere.
+    pvpMode: false
 };
 
 // async function loadWasm(state) {
@@ -69,7 +79,8 @@ function mmaiApp (state = initialState, action) {
                 // played locally by humans, so "pop until it's my turn" (undoMyTurn, built
                 // for popping through the AI's reply) isn't the right semantics -- a single
                 // ply back is.
-                if (newState.deadPenteConfig && newState.deadPenteConfig.deadStones.allowAi === false) {
+                if ((newState.deadPenteConfig && newState.deadPenteConfig.deadStones.allowAi === false)
+                    || newState.pvpMode) {
                     newGame.undoMove();
                 } else {
                     newGame.undoMyTurn();
@@ -89,6 +100,7 @@ function mmaiApp (state = initialState, action) {
             // Switching variant via the main dropdown always exits any active Dead-Pente mode.
             newState.deadPenteConfig = null;
             newState.placingDeadStone = false;
+            newState.pvpMode = false;
             break;
         case SELECT_DEAD_PENTE_CONFIG:
             newGame = newState.game.newInstance();
@@ -97,11 +109,15 @@ function mmaiApp (state = initialState, action) {
             newState.game = newGame;
             newState.deadPenteConfig = action.payload ? DEAD_PENTE_CONFIGS[action.payload] : null;
             newState.placingDeadStone = false;
+            newState.pvpMode = false;
             newState.started = false;
             newState.snack = undefined;
             break;
         case TOGGLE_DEAD_STONE_MODE:
             newState.placingDeadStone = !state.placingDeadStone;
+            break;
+        case TOGGLE_PVP_MODE:
+            newState.pvpMode = !state.pvpMode;
             break;
         case PLACE_DEAD_STONE:
         case RESOLVE_CAPTURE_DEAD_STONE:

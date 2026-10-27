@@ -3,7 +3,7 @@ import { connect } from 'react-redux';
 import { START_GAME, CHANGE_GAME, CHANGE_LEVEL,
     UNDO_MOVE, CHANGE_COLOR, OPENING_BOOK,
     SELECT_DEAD_PENTE_CONFIG, TOGGLE_DEAD_STONE_MODE,
-    DECLINE_DEAD_STONE_WINDOW } from "../redux_actions/actionTypes";
+    DECLINE_DEAD_STONE_WINDOW, TOGGLE_PVP_MODE } from "../redux_actions/actionTypes";
 import { remainingDeadStones, isDeadStoneTurnEligible } from "../Classes/DeadPenteRules";
 import { DEAD_PENTE_CONFIGS } from "../Classes/DeadPenteConfigs";
 
@@ -21,6 +21,7 @@ import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import MovesListPanel from './MovesListPanel';
 import DeadPenteRulesModal from './DeadPenteRulesModal';
+import CorpsePenteRulesModal from './CorpsePenteRulesModal';
 
 const styles = theme => ({
     root: {
@@ -40,7 +41,8 @@ const mapStateToProps = state => {
         use_book: state.opening_book,
         thinking: state.thinking,
         deadPenteConfig: state.deadPenteConfig,
-        placingDeadStone: state.placingDeadStone
+        placingDeadStone: state.placingDeadStone,
+        pvpMode: state.pvpMode
     }
 };
 
@@ -73,6 +75,9 @@ const mapDispatchToProps = dispatch => {
         decline_dead_stone_window: () => {
             dispatch({ type: DECLINE_DEAD_STONE_WINDOW })
         },
+        toggle_pvp_mode: () => {
+            dispatch({ type: TOGGLE_PVP_MODE })
+        },
     }
 };
 
@@ -85,9 +90,10 @@ const UnconnectedGameInfoPanel = (props) => {
         level, undo_move, change_color, color,
         toggle_openingbook, use_book, thinking,
         deadPenteConfig, placingDeadStone, select_dead_pente, toggle_dead_stone_mode,
-        decline_dead_stone_window } = props;
+        decline_dead_stone_window, pvpMode, toggle_pvp_mode } = props;
 
     const [rulesOpen, setRulesOpen] = useState(false);
+    const [corpseRulesOpen, setCorpseRulesOpen] = useState(false);
 
     // Dead-Pente, on_capture trigger (Phase 4): the human's own capturing move left them a
     // pending reactive placement. `color` is the human's seat ('white'/'black'); game.me tracks
@@ -188,7 +194,7 @@ const UnconnectedGameInfoPanel = (props) => {
                                             />
                                         }
                                     >
-                                        {[1, 3, 11, 13, 15, 25].map(g =>
+                                        {[1, 3, 11, 13, 15, 25, 27].map(g =>
                                             <MenuItem key={g} value={g}>{game.game_name(g)}</MenuItem>
                                         )}
                                     </Select>
@@ -209,6 +215,24 @@ const UnconnectedGameInfoPanel = (props) => {
                                 </Button>
                             </div>
                         </Grid>
+                        {game.game === 27 &&
+                        <Grid item xs>
+                            <div style={{display: 'table', margin: '0 auto'}}>
+                                <Button variant="outlined" color={pvpMode ? 'error' : 'primary'} onClick={toggle_pvp_mode}>
+                                    {pvpMode ? 'two-player mode (on)' : 'two-player mode (off)'}
+                                </Button>
+                            </div>
+                        </Grid>
+                        }
+                        {game.game === 27 &&
+                        <Grid item xs>
+                            <div style={{display: 'table', margin: '0 auto'}}>
+                                <Button variant="outlined" color="secondary" onClick={() => setCorpseRulesOpen(true)}>
+                                    corpse-pente rules
+                                </Button>
+                            </div>
+                        </Grid>
+                        }
                     </Grid>
                 </Grid>
                 <Grid item>
@@ -294,6 +318,7 @@ const UnconnectedGameInfoPanel = (props) => {
             </Grid>
             <DeadPenteRulesModal open={rulesOpen} onClose={() => setRulesOpen(false)}
                                   activeId={deadPenteConfig ? deadPenteConfig.gameModeId : null}/>
+            <CorpsePenteRulesModal open={corpseRulesOpen} onClose={() => setCorpseRulesOpen(false)}/>
         </div>
     );
 };

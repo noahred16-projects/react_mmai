@@ -29,3 +29,8 @@ export const PLACE_DEAD_STONE = 'PLACE_DEAD_STONE';
 export const RESOLVE_CAPTURE_DEAD_STONE = 'RESOLVE_CAPTURE_DEAD_STONE';
 export const DECLINE_DEAD_STONE_WINDOW = 'DECLINE_DEAD_STONE_WINDOW';
 
+// Local two-player mode (e.g. Corpse-Pente): disables the AI call in sagas.js so both
+// colors are played by humans at this screen, same spirit as Dead-Pente's allowAi: false
+// but as a plain toggle rather than a config field, since it isn't tied to any one variant.
+export const TOGGLE_PVP_MODE = 'TOGGLE_PVP_MODE';
+

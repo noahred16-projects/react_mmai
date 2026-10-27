@@ -15,7 +15,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 // GameClass as a temp *.mjs (see gameclass.test.mjs for why).
 const gcTmp = join(tmpdir(), `gameclass.eng.${process.pid}.mjs`);
 writeFileSync(gcTmp, readFileSync(join(here, '..', 'src', 'Classes', 'GameClass.js'), 'utf8'));
-const { Game } = await import(pathToFileURL(gcTmp).href);
+const { Game, CORPSE_STONE } = await import(pathToFileURL(gcTmp).href);
 unlinkSync(gcTmp);
 
 // WASM engine glue (emscripten CJS). Prepend `var Module = ...` per MMAIWASM/smoke.js and
@@ -72,13 +72,20 @@ function hasSixContiguous(g, color) {
     return false;
 }
 
-for (const gameId of [11, 15, 25]) {
+for (const gameId of [11, 15, 25, 27]) {
     const g = freshGame(gameId);
     g.addMove(180); // opening center (matches START_GAME saga), player 1
     let expected = countStones(g);
     let prev1 = g.captures[1], prev2 = g.captures[2];
     let ok = true, detail = '', plies = 0;
-    for (let ply = 0; ply < 20 && !g.isGameOver(); ply++) {
+    // Corpse-Pente (27): the added/removed/colorFlip accounting below already covers it for
+    // free -- a captured pair going from color 1/2 to CORPSE_STONE looks exactly like a
+    // normal capture-removal (neither "added" nor "color 1/2" afterward), and a cleaned-up
+    // corpse (CORPSE_STONE -> 0) never touched 1/2 at all, so it's invisible to that check
+    // too. This just separately confirms the mechanic actually fired in real engine-vs-engine
+    // play, not only in the crafted corpse-pente.test.mjs fixtures.
+    const plyCount = (gameId === 27) ? 40 : 20;
+    for (let ply = 0; ply < plyCount && !g.isGameOver(); ply++) {
         const before = snapshot(g);
         const mover = g.currentPlayer();
         const mv = engineMove(gameId, g.moves, 1, 0);
@@ -112,12 +119,39 @@ for (const gameId of [11, 15, 25]) {
     // g.isGameOver() goes true, and (if `ok` never got set to false) the check above would
     // still pass even if that happened after only a couple of plies due to a bogus win
     // condition. Require either a full-length replay, or a genuine, explained game-over.
-    check(`engine<->referee game ${gameId} replay length is plausible (full 20 plies or a real isGameOver)`,
-        plies === 20 || g.isGameOver() === true,
+    check(`engine<->referee game ${gameId} replay length is plausible (full ${plyCount} plies or a real isGameOver)`,
+        plies === plyCount || g.isGameOver() === true,
         `plies=${plies} caps=${JSON.stringify(g.captures)}`);
     check(`engine<->referee game ${gameId} did not end implausibly early (>= 8 plies)`,
         plies >= 8,
         `plies=${plies} caps=${JSON.stringify(g.captures)}`);
+
+}
+
+// Corpse-Pente corpse-presence check, as its own multi-trial loop rather than tacked onto
+// the shared invariant loop above: at level 1 a single 40-ply game can legitimately end via
+// a row win before any capture happens at all (observed caps=[0,0], a real early row win,
+// not a bug), which would make a single-run assertion flaky. Try a few short games and
+// require corpses to show up in at least one -- still proves the mechanic fires in real
+// engine-vs-engine play without being at the mercy of one unlucky seed.
+{
+    let corpses = 0, trials = 0, lastDetail = '';
+    for (trials = 0; trials < 5 && corpses === 0; trials++) {
+        const g = freshGame(27);
+        g.addMove(180);
+        for (let ply = 0; ply < 40 && !g.isGameOver(); ply++) {
+            const mv = engineMove(27, g.moves, 1, 0);
+            if (!Number.isInteger(mv) || mv < 0 || mv > 360) break;
+            const x = mv % 19, y = Math.floor(mv / 19);
+            if (!(g.abstractBoard[x][y] === 0 || g.abstractBoard[x][y] === -1)) break;
+            g.addMove(mv);
+        }
+        for (let x = 0; x < 19; x++) for (let y = 0; y < 19; y++)
+            if (g.abstractBoard[x][y] === CORPSE_STONE) corpses++;
+        lastDetail = `trial ${trials}: caps=${JSON.stringify(g.captures)}`;
+    }
+    check('engine<->referee game 27 (Corpse-Pente) real engine-vs-engine play produced corpses',
+        corpses > 0, `corpses=${corpses} after ${trials} trial(s), ${lastDetail}`);
 }
 
 // ---------------------------------------------------------------------------

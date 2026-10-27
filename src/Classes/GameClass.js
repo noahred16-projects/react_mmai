@@ -28,6 +28,15 @@ const coordinateLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L'
 // replay dead-stone placements) is middleware/Redux-layer work, not core-engine work.
 export const DEAD_STONE = 3;
 
+// Corpse-Pente (game 27/28): the cell left behind by a captured pair. Every capture/win
+// detector that matches a cell by strict equality against color 1 or 2 (#detectPenteCapture,
+// #detectPenteOf, etc.) already treats CORPSE_STONE as an unoccupiable wall -- blocks
+// line-of-5, can't itself be placed on -- with no changes needed to those shared detectors.
+// Unlike DEAD_STONE, a corpse CAN complete a capture flank (for either color) and CAN itself
+// be swept away; that behavior lives in #detectCorpsePenteCapture/#detectCorpseCleanup below,
+// not in the shared detectors.
+export const CORPSE_STONE = 4;
+
 export class Game {
     constructor() {
         this.game = 1;
@@ -143,6 +152,8 @@ export class Game {
             name = 'Go (13x13)';
         } else if (g < 27) {
             name = 'O-Pente';
+        } else if (g < 29) {
+            name = 'Corpse-Pente';
         }
         if (g % 2 === 0) {
             return 'Speed '+name;
@@ -208,6 +219,16 @@ export class Game {
                 } else if (this.captures[2] >= 15 && this.captures[2] > this.captures[1]) {
                     this.winner = 1;
                 }
+            }
+        } else if (base === 27) {
+            // Corpse-Pente: same capture-win threshold as plain Pente -- 10, immediate,
+            // no advantage clause. The corpse mechanic changes what a capture leaves
+            // behind, not how many captures it takes to win.
+            if (this.captures[1] >= 10) {
+                this.winner = 2;
+            }
+            if (this.captures[2] >= 10) {
+                this.winner = 1;
             }
         }
         if (this.winner) {
@@ -485,6 +506,9 @@ export class Game {
     isConnect6 = () => {
         return this.game === 13 || this.game === 14;
     };
+    isCorpsePente = () => {
+        return this.game === 27 || this.game === 28;
+    };
     isGo = () => {
         return this.game > 18 && this.game < 25;
     };
@@ -611,6 +635,8 @@ export class Game {
             this.#replayGoGame(until);
         } else if (this.game < 27) {
             this.#replayOPenteGame(until);
+        } else if (this.game < 29) {
+            this.#replayCorpsePenteGame(until);
         }
     };
     
@@ -683,6 +709,14 @@ export class Game {
         } else if (this.game < 27) {
             let player = 1 + (i%2);
             this.#addOPenteMove(x, y, player);
+            if (this.rated && this.moves.length === 2) {
+                this.#applyTournamentRule();
+            } else if (this.rated && this.moves.length === 3) {
+                this.#undoTournamentRule();
+            }
+        } else if (this.game < 29) {
+            let player = 1 + (i%2);
+            this.#addCorpsePenteMove(x, y, player);
             if (this.rated && this.moves.length === 2) {
                 this.#applyTournamentRule();
             } else if (this.rated && this.moves.length === 3) {
@@ -840,6 +874,17 @@ export class Game {
             } else if (this.rated && this.moves.length === 3) {
                 this.#undoTournamentRule();
             }
+        } else if (this.game < 29) {
+            let player = 2 - (this.moves.length%2);
+            this.#addCorpsePenteMove(x, y, player);
+            if (this.rated && this.moves.length === 2) {
+                this.#applyTournamentRule();
+            } else if (this.rated && this.moves.length === 3) {
+                this.#undoTournamentRule();
+            }
+            if (this.#detectPenteOf(player, move)) {
+                this.winner = player;
+            }
         }
     };
 
@@ -995,6 +1040,68 @@ export class Game {
         }
         if (this.rated && (this.moves.length === 2)) {
             this.#applyTournamentRule();
+        }
+    };
+
+    // Corpse-Pente (game 27/28): standard Pente, except a captured pair leaves two
+    // CORPSE_STONE cells behind instead of clearing to empty. Run the cleanup scan BEFORE
+    // the capture scan: a capture's own two new corpses are, by construction, immediately
+    // flanked by the exact two real stones that just captured them -- scanning cleanup
+    // first means it only ever sees corpses left over from EARLIER moves, so a capture can
+    // never self-trigger its own corpses' cleanup in the same call.
+    #addCorpsePenteMove = (x, y, player) => {
+        this.#addGomokuMove(x, y, player);
+        this.#detectCorpseCleanup(x, y);
+        this.#detectCorpsePenteCapture(x, y, player);
+    };
+    #replayCorpsePenteGame = (until) => {
+        for (let i = 0; i < Math.min(this.moves.length, until); i++) {
+            let color = 1 + (i%2);
+            let x = this.moves[i] % 19, y = Math.floor(this.moves[i] / 19);
+            this.#addCorpsePenteMove(x, y, color);
+        }
+        if (this.rated && (this.moves.length === 2)) {
+            this.#applyTournamentRule();
+        }
+    };
+    // Two corpses flanked by any two real stones -- either color, either combination --
+    // vanish with no capture credit to anyone. (x, y), the stone just placed, is always
+    // one flank; the far flank 3 cells out just needs to be a real stone, any color.
+    #detectCorpseCleanup = (x, y) => {
+        const axes8 = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]];
+        for (const [dx, dy] of axes8) {
+            const x1 = x+dx, y1 = y+dy, x2 = x+2*dx, y2 = y+2*dy, x3 = x+3*dx, y3 = y+3*dy;
+            if (x3 < 0 || x3 > 18 || y3 < 0 || y3 > 18) {
+                continue;
+            }
+            const far = this.abstractBoard[x3][y3];
+            if (this.abstractBoard[x1][y1] === CORPSE_STONE && this.abstractBoard[x2][y2] === CORPSE_STONE &&
+                (far === 1 || far === 2)) {
+                this.abstractBoard[x1][y1] = 0;
+                this.abstractBoard[x2][y2] = 0;
+            }
+        }
+    };
+    // Standard pair capture, except the far flank may be the mover's own color OR an
+    // existing corpse (a corpse stands in as a flank for either player), and the captured
+    // pair becomes corpses instead of clearing to empty.
+    #detectCorpsePenteCapture = (x, y, myColor) => {
+        const opponentColor = 1 + (myColor % 2);
+        const axes8 = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]];
+        for (const [dx, dy] of axes8) {
+            const x1 = x+dx, y1 = y+dy, x2 = x+2*dx, y2 = y+2*dy, x3 = x+3*dx, y3 = y+3*dy;
+            if (x3 < 0 || x3 > 18 || y3 < 0 || y3 > 18) {
+                continue;
+            }
+            const far = this.abstractBoard[x3][y3];
+            if (far !== myColor && far !== CORPSE_STONE) {
+                continue;
+            }
+            if (this.abstractBoard[x1][y1] === opponentColor && this.abstractBoard[x2][y2] === opponentColor) {
+                this.abstractBoard[x1][y1] = CORPSE_STONE;
+                this.abstractBoard[x2][y2] = CORPSE_STONE;
+                this.captures[opponentColor] += 2;
+            }
         }
     };
 
