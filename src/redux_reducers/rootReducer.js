@@ -11,10 +11,10 @@ import { Game } from '../Classes/GameClass';
 import { DEAD_PENTE_CONFIGS } from '../Classes/DeadPenteConfigs';
 import { canPlaceDeadStoneNow, ownerOfMoveIndex } from '../Classes/DeadPenteRules';
 
-// Corpse-Pente (27) is the default variant shown on load.
+// Corpse-Pente v2 (29) is the default variant shown on load.
 const defaultGame = () => {
     const g = new Game();
-    g.setGame(27);
+    g.setGame(29);
     return g;
 };
 
