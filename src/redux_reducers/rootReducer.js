@@ -73,7 +73,14 @@ function mmaiApp (state = initialState, action) {
             newState.level = parseInt(action.payload);
             break;
         case UNDO_MOVE:
-            if (newState.started) {
+            // Guard on moves.length rather than `started`: `started` goes false the instant
+            // a game ends (STORE_MOVE/PLACE_DEAD_STONE set it when isGameOver()), which used
+            // to make Undo a silent no-op right when you'd most want it -- taking back the
+            // losing move. moves.length > 0 is the real precondition ("is there anything to
+            // undo"); it's never true in a genuinely fresh/reset state, since every action
+            // that sets started=false also resets the board first (CHANGE_COLOR, CHANGE_GAME,
+            // SELECT_DEAD_PENTE_CONFIG) except the "game just ended" case this is fixing.
+            if (newState.game.moves.length > 0) {
                 newGame = newState.game.newInstance();
                 // In a no-AI Dead-Pente mode (e.g. dead-pente-ned-open) both colors are
                 // played locally by humans, so "pop until it's my turn" (undoMyTurn, built
@@ -86,6 +93,11 @@ function mmaiApp (state = initialState, action) {
                     newGame.undoMyTurn();
                 }
                 newState.game = newGame;
+                // Undoing out of a just-ended game (newGame.winner is cleared by the replay
+                // inside undoMove/undoMyTurn above) makes it live again -- resume play
+                // without requiring "play" (which would wipe the board via RESET_BOARD).
+                newState.started = true;
+                newState.snack = undefined;
             }
             break;
         case CHANGE_GAME:
